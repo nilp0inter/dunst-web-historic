@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dunst Notification History</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .counts {
+            font-size: 14px;
+            color: #9ca3af;
+        }
+        
+        .refresh-btn {
+            background: #333;
+            border: 1px solid #555;
+            color: #e0e0e0;
+            padding: 6px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.2s ease;
+            min-width: auto;
+        }
+        
+        .refresh-btn:hover {
+            background: #444;
+        }
+        
+        .notifications-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .notification {
+            background: #2a2a2a;
+            border: 1px solid #404040;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 12px;
+            transition: background 0.2s ease;
+        }
+        
+        .notification:hover {
+            background: #333;
+        }
+        
+        .notification-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        
+        .app-name {
+            color: #9ca3af;
+            font-weight: 500;
+        }
+        
+        .timestamp {
+            color: #6b7280;
+            font-size: 13px;
+            cursor: help;
+        }
+        
+        .timestamp:hover {
+            color: #9ca3af;
+        }
+        
+        .summary {
+            font-weight: 600;
+            color: #f3f4f6;
+            margin-bottom: 6px;
+            font-size: 15px;
+        }
+        
+        .body {
+            color: #d1d5db;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .body a, .summary a {
+            color: #60a5fa;
+            text-decoration: underline;
+            transition: color 0.2s ease;
+        }
+        
+        .body a:hover, .summary a:hover {
+            color: #93c5fd;
+        }
+        
+        .otp-container {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 4px;
+            padding: 2px 6px;
+            margin: 0 2px;
+        }
+        
+        .otp-code {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: #60a5fa;
+            letter-spacing: 1px;
+        }
+        
+        .otp-copy-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 12px;
+            padding: 2px;
+            border-radius: 2px;
+            transition: background 0.2s ease;
+            line-height: 1;
+        }
+        
+        .otp-copy-btn:hover {
+            background: rgba(59, 130, 246, 0.2);
+        }
+        
+        .otp-copy-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .urgency {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            margin-top: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .urgency-low {
+            background: #065f46;
+            color: #a7f3d0;
+        }
+        
+        .urgency-normal {
+            background: #1e3a8a;
+            color: #93c5fd;
+        }
+        
+        .urgency-critical {
+            background: #991b1b;
+            color: #fca5a5;
+        }
+        
+        .stats {
+            text-align: right;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #9ca3af;
+        }
+        
+        .loading {
+            text-align: center;
+            font-size: 16px;
+            margin: 50px 0;
+            color: #9ca3af;
+        }
+        
+        .error {
+            background: #7f1d1d;
+            border: 1px solid #991b1b;
+            color: #fca5a5;
+            padding: 16px;
+            border-radius: 6px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        @media (max-width: 768px) {
+            .notification-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 4px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">        
+        <div class="controls">
+            <div id="counts" class="counts">Loading counts...</div>
+            <button class="refresh-btn" onclick="loadNotifications()">🔄</button>
+        </div>
+        
+        <div id="loading" class="loading">Loading notifications...</div>
+        <div id="error" class="error" style="display: none;"></div>
+        <ul id="notifications" class="notifications-list"></ul>
+    </div>
+
+    <script>
+        // Global variables for timestamp calculations
+        let systemUptime = null;
+        let uptimeFetchTime = null;
+        
+        // Polling for notification count changes (any of the three values)
+        let lastCounts = null;
+        
+        async function checkForUpdates() {
+            try {
+                const response = await fetch('/api/count');
+                const counts = await response.json();
+                
+                if (lastCounts !== null) {
+                    // Check if any of the three values changed
+                    if (counts.waiting !== lastCounts.waiting || 
+                        counts.displayed !== lastCounts.displayed || 
+                        counts.history !== lastCounts.history) {
+                        
+                        console.log(`Counts changed:`, lastCounts, '->', counts);
+                        loadNotifications();
+                    }
+                }
+                
+                lastCounts = {...counts}; // Store a copy of current counts
+                
+                // Update counts display
+                const countsElement = document.getElementById('counts');
+                countsElement.innerHTML = `Waiting: ${counts.waiting} | Displayed: ${counts.displayed} | History: ${counts.history}`;
+            } catch (error) {
+                console.log('Error checking count:', error.message);
+            }
+        }
+        
+        function getCurrentUptime() {
+            if (!systemUptime || !uptimeFetchTime) return null;
+            // Calculate current uptime by adding elapsed time since fetch
+            const elapsedSeconds = (Date.now() - uptimeFetchTime) / 1000;
+            return systemUptime + elapsedSeconds;
+        }
+        
+        function formatRelativeTime(notificationTimestamp) {
+            const currentUptime = getCurrentUptime();
+            if (!currentUptime) return 'Unknown';
+            
+            // Extract the notification timestamp (in microseconds)
+            const notificationUptimeSeconds = extractData(notificationTimestamp) / 1000000;
+            
+            // Calculate how long ago the notification occurred
+            const secondsAgo = currentUptime - notificationUptimeSeconds;
+            
+            // Format as relative time
+            const minutes = Math.floor(secondsAgo / 60);
+            const hours = Math.floor(minutes / 60);
+            const days = Math.floor(hours / 24);
+            
+            if (days > 0) {
+                return `${days}d ${hours % 24}h ago`;
+            } else if (hours > 0) {
+                return `${hours}h ${minutes % 60}m ago`;
+            } else if (minutes > 0) {
+                return `${minutes}m ago`;
+            } else {
+                return `${Math.max(0, Math.floor(secondsAgo))}s ago`;
+            }
+        }
+        
+        function calculateNotificationDate(notificationTimestamp) {
+            const currentUptime = getCurrentUptime();
+            if (!currentUptime) return null;
+            
+            const notificationUptimeSeconds = extractData(notificationTimestamp) / 1000000;
+            const secondsAgo = currentUptime - notificationUptimeSeconds;
+            const notificationDate = new Date(Date.now() - (secondsAgo * 1000));
+            
+            return notificationDate.toLocaleString('en-US', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            });
+        }
+        
+        function updateAllTimestamps() {
+            const timestampElements = document.querySelectorAll('.timestamp[data-notification-timestamp]');
+            timestampElements.forEach(element => {
+                const notificationTimestamp = JSON.parse(element.getAttribute('data-notification-timestamp'));
+                element.textContent = formatRelativeTime(notificationTimestamp);
+            });
+        }
+        
+        async function loadCounts() {
+            try {
+                const response = await fetch('/api/count');
+                const counts = await response.json();
+                const countsElement = document.getElementById('counts');
+                countsElement.innerHTML = `Waiting: ${counts.waiting} | Displayed: ${counts.displayed} | History: ${counts.history}`;
+            } catch (error) {
+                console.log('Error loading counts:', error.message);
+            }
+        }
+        
+        async function formatTimestamp(timestamp, currentUptime) {
+            try {
+                // Extract the notification timestamp (in microseconds)
+                const notificationTimestamp = extractData(timestamp);
+                
+                // Convert notification timestamp from microseconds to seconds
+                const notificationUptimeSeconds = notificationTimestamp / 1000000;
+                
+                // Calculate how long ago the notification occurred
+                const secondsAgo = currentUptime - notificationUptimeSeconds;
+                
+                // Format as relative time
+                const minutes = Math.floor(secondsAgo / 60);
+                const hours = Math.floor(minutes / 60);
+                const days = Math.floor(hours / 24);
+                
+                if (days > 0) {
+                    return `${days}d ${hours % 24}h ago`;
+                } else if (hours > 0) {
+                    return `${hours}h ${minutes % 60}m ago`;
+                } else if (minutes > 0) {
+                    return `${minutes}m ago`;
+                } else {
+                    return `${Math.max(0, Math.floor(secondsAgo))}s ago`;
+                }
+            } catch (error) {
+                // Fallback to raw timestamp if calculation fails
+                return `Raw: ${extractData(timestamp)}`;
+            }
+        }
+        
+        function getUrgencyClass(urgency) {
+            const urgencyStr = String(urgency || 'normal').toLowerCase();
+            switch(urgencyStr) {
+                case 'low': return 'urgency-low';
+                case 'critical': return 'urgency-critical';
+                default: return 'urgency-normal';
+            }
+        }
+        
+        function extractData(field) {
+            // dunst returns fields in format {type: "s", data: "actual_value"}
+            return field && field.data !== undefined ? field.data : field;
+        }
+        
+        function makeLinksClickable(text, urls) {
+            if (!text || !urls) return text;
+            
+            // Split URLs by whitespace or newlines if multiple URLs exist
+            const urlList = urls.split(/\s+/).filter(url => url.trim());
+            
+            let result = text;
+            urlList.forEach(url => {
+                if (url.trim()) {
+                    // Create clickable link that opens in new tab
+                    const link = `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color: #60a5fa; text-decoration: underline;">${url}</a>`;
+                    // Replace the URL in the text
+                    result = result.replace(url, link);
+                }
+            });
+            
+            return result;
+        }
+        
+        function addOTPCopyButtons(text) {
+            // Regex to find OTP codes: 4-8 consecutive digits, often standalone or with specific context
+            const otpRegex = /\b(\d{4,8})\b/g;
+            
+            return text.replace(otpRegex, (match, code) => {
+                // Generate unique ID for each OTP button
+                const buttonId = 'otp-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                
+                return `<span class="otp-container">
+                    <span class="otp-code">${code}</span>
+                    <button class="otp-copy-btn" onclick="copyOTP('${code}', '${buttonId}')" id="${buttonId}" title="Copy code">📋</button>
+                </span>`;
+            });
+        }
+        
+        function copyOTP(code, buttonId) {
+            navigator.clipboard.writeText(code).then(() => {
+                const button = document.getElementById(buttonId);
+                const originalText = button.textContent;
+                button.textContent = '✅';
+                button.style.color = '#10b981';
+                
+                // Reset button after 2 seconds
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.style.color = '';
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy OTP:', err);
+                const button = document.getElementById(buttonId);
+                button.textContent = '❌';
+                setTimeout(() => {
+                    button.textContent = '📋';
+                }, 1000);
+            });
+        }
+        
+        async function renderNotifications(data) {
+            const container = document.getElementById('notifications');
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+            
+            loading.style.display = 'none';
+            error.style.display = 'none';
+            
+            if (!data || !data.data || !Array.isArray(data.data[0])) {
+                error.innerHTML = 'Invalid notification data format';
+                error.style.display = 'block';
+                return;
+            }
+            
+            const notifications = data.data[0]; // dunst history returns nested array
+            
+            if (notifications.length === 0) {
+                container.innerHTML = '<li style="text-align: center; padding: 50px; color: #9ca3af;">No notifications found</li>';
+                return;
+            }
+            
+            // Sort notifications by timestamp (newest first)
+            notifications.sort((a, b) => extractData(b.timestamp) - extractData(a.timestamp));
+            
+            // Fetch uptime once for initial calculation
+            try {
+                const uptimeResponse = await fetch('/api/uptime');
+                systemUptime = parseInt(await uptimeResponse.text());
+                uptimeFetchTime = Date.now();
+                
+                // Render notifications with timestamp data attributes
+                const notificationElements = notifications.map(notification => {
+                    const timestampData = JSON.stringify(notification.timestamp);
+                    const initialTimestamp = formatRelativeTime(notification.timestamp);
+                    const actualDate = calculateNotificationDate(notification.timestamp);
+                    
+                    // Extract text content and URLs
+                    const summary = extractData(notification.summary) || 'No summary';
+                    const body = extractData(notification.body) || 'No content';
+                    const urls = extractData(notification.urls) || '';
+                    
+                    // Make URLs clickable and add OTP copy buttons
+                    const summaryWithLinks = makeLinksClickable(summary, urls);
+                    const bodyWithLinks = makeLinksClickable(body, urls);
+                    const summaryWithOTP = addOTPCopyButtons(summaryWithLinks);
+                    const bodyWithOTP = addOTPCopyButtons(bodyWithLinks);
+                    
+                    return `
+                        <li class="notification">
+                            <div class="notification-header">
+                                <span class="app-name">${extractData(notification.appname) || 'Unknown App'}</span>
+                                <span class="timestamp" 
+                                      data-notification-timestamp='${timestampData}'
+                                      title="${actualDate || 'Unknown date'}">${initialTimestamp}</span>
+                            </div>
+                            <div class="summary">${summaryWithOTP}</div>
+                            <div class="body">${bodyWithOTP}</div>
+                            <div class="urgency ${getUrgencyClass(extractData(notification.urgency))}">${String(extractData(notification.urgency) || 'normal')}</div>
+                        </li>
+                    `;
+                });
+                
+                container.innerHTML = notificationElements.join('');
+            } catch (error) {
+                error.innerHTML = `Error loading uptime: ${error.message}`;
+                error.style.display = 'block';
+            }
+        }
+        
+        async function loadNotifications() {
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+            
+            loading.style.display = 'block';
+            error.style.display = 'none';
+            
+            try {
+                const response = await fetch('/api/notifications');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                await renderNotifications(data);
+            } catch (err) {
+                loading.style.display = 'none';
+                error.innerHTML = `Error loading notifications: ${err.message}`;
+                error.style.display = 'block';
+            }
+        }
+        
+        // Load notifications and counts on page load and start polling
+        document.addEventListener('DOMContentLoaded', function() {
+            loadNotifications();
+            
+            // Check for history count changes every second
+            setInterval(checkForUpdates, 1000);
+            
+            // Update timestamps every second
+            setInterval(updateAllTimestamps, 1000);
+        });
+        
+        // Keyboard shortcut for manual refresh (R key)
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'r' || event.key === 'R') {
+                event.preventDefault();
+                loadNotifications();
+            }
+        });
+    </script>
+</body>
+</html>
